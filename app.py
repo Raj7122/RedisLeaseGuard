@@ -8,7 +8,7 @@ from smolagents.mcp_client import MCPClient
 
 try:
     mcp_client = MCPClient(
-        {"url": "https://raj718-mcp-sentiment.hf.space/gradio_api/mcp/sse"}
+        {"url": "https://abidlabs-mcp-tools.hf.space/gradio_api/mcp/sse"}
     )
     tools = mcp_client.get_tools()
 
@@ -25,4 +25,5 @@ try:
 
     demo.launch()
 finally:
-    mcp_client.close() 
+    if 'mcp_client' in locals():
+        mcp_client.close() 
