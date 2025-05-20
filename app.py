@@ -13,8 +13,11 @@ try:
     )
     tools = mcp_client.get_tools()
 
-    token = os.environ.get("HF_TOKEN")
-    model = InferenceClientModel(token=token)
+    # Using a simpler model configuration
+    model = InferenceClientModel(
+        model_id="mistralai/Mistral-7B-Instruct-v0.2",
+        api_url="https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    )
     agent = CodeAgent(tools=[*tools], model=model)
 
     demo = gr.ChatInterface(
