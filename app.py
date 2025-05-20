@@ -1,4 +1,3 @@
-import os
 import gradio as gr
 
 # from mcp.client.stdio import StdioServerParameters
@@ -9,15 +8,11 @@ from smolagents.mcp_client import MCPClient
 
 try:
     mcp_client = MCPClient(
-        {"url": "https://abidlabs-mcp-tools.hf.space/gradio_api/mcp/sse"}
+        {"url": "https://raj718-mcp-sentiment.hf.space/gradio_api/mcp/sse"}
     )
     tools = mcp_client.get_tools()
 
-    # Using a simpler model configuration
-    model = InferenceClientModel(
-        model_id="mistralai/Mistral-7B-Instruct-v0.2",
-        api_url="https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-    )
+    model = InferenceClientModel()
     agent = CodeAgent(tools=[*tools], model=model)
 
     demo = gr.ChatInterface(
@@ -30,5 +25,4 @@ try:
 
     demo.launch()
 finally:
-    if hasattr(mcp_client, "close"):
-        mcp_client.close() 
+    mcp_client.close() 
