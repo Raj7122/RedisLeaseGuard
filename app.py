@@ -1,4 +1,3 @@
-import os
 import gradio as gr
 
 # from mcp.client.stdio import StdioServerParameters
@@ -9,12 +8,11 @@ from smolagents.mcp_client import MCPClient
 
 try:
     mcp_client = MCPClient(
-        {"url": "https://abidlabs-mcp-tools.hf.space/gradio_api/mcp/sse"}
+        {"url": "http://localhost:7860/gradio_api/mcp/sse"}
     )
     tools = mcp_client.get_tools()
 
-    token = os.environ.get("HF_TOKEN")
-    model = InferenceClientModel(token=token)
+    model = InferenceClientModel()
     agent = CodeAgent(tools=[*tools], model=model)
 
     demo = gr.ChatInterface(
@@ -27,5 +25,4 @@ try:
 
     demo.launch()
 finally:
-    if 'mcp_client' in locals():
-        mcp_client.close() 
+    mcp_client.close() 
