@@ -1,3 +1,4 @@
+import os
 import gradio as gr
 
 # from mcp.client.stdio import StdioServerParameters
@@ -12,7 +13,8 @@ try:
     )
     tools = mcp_client.get_tools()
 
-    model = InferenceClientModel()
+    token = os.environ.get("HF_TOKEN")
+    model = InferenceClientModel(token=token)
     agent = CodeAgent(tools=[*tools], model=model)
 
     demo = gr.ChatInterface(
