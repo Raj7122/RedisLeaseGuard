@@ -8,7 +8,7 @@ from smolagents.mcp_client import MCPClient
 
 try:
     mcp_client = MCPClient(
-        {"url": "https://huggingface.co/spaces/Raj718/mcp-client"}
+        {"url": "http://localhost:7860/gradio_api/mcp/sse"}
     )
     tools = mcp_client.get_tools()
 
@@ -24,7 +24,6 @@ try:
     )
 
     demo.launch()
-except Exception as e:
-    print(e)
+    
 finally:
     mcp_client.close() 
