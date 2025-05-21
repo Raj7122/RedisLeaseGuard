@@ -24,5 +24,7 @@ try:
     )
 
     demo.launch()
+except Exception as e:
+    print(e)
 finally:
     mcp_client.close() 
