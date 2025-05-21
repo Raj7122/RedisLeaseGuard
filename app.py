@@ -8,7 +8,7 @@ from smolagents.mcp_client import MCPClient
 
 try:
     mcp_client = MCPClient(
-        {"url": "https://raj718-mcp-sentiment.hf.space/gradio_api/mcp/sse"}
+        {"url": "https://huggingface.co/spaces/Raj718/mcp-client"}
     )
     tools = mcp_client.get_tools()
 
