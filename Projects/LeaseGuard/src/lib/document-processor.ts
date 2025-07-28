@@ -1,11 +1,11 @@
-import * as pdfjsLib from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
 import geminiClient from './gemini';
 import redisClient from './redis';
 import { ViolationPattern, getAllViolationPatterns, findViolationPatternById } from './housing-law-database';
 
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// PDF.js will be imported dynamically when needed
+let pdfjsLib: any = null;
+let pdfjsLoaded = false;
 
 export interface ProcessedClause {
   id: string;
@@ -107,6 +107,19 @@ class DocumentProcessor {
    */
   private async extractTextFromPDF(file: File): Promise<string> {
     try {
+      // Dynamically import PDF.js only when needed
+      if (!pdfjsLoaded) {
+        try {
+          pdfjsLib = await import('pdfjs-dist');
+          // Configure PDF.js worker
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+          pdfjsLoaded = true;
+        } catch (importError) {
+          console.error('Failed to import PDF.js:', importError);
+          throw new Error('PDF processing is not available in this environment');
+        }
+      }
+      
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       
@@ -289,7 +302,9 @@ class DocumentProcessor {
       console.log(`Stored ${clauses.length} clauses in Redis for lease ${leaseId}`);
     } catch (error) {
       console.error('Error storing in Redis:', error);
-      throw new Error('Failed to store processed data');
+      // Don't throw error - Redis storage failure shouldn't block document processing
+      // The analysis results are still valid and can be returned to the user
+      console.warn('Redis storage failed, but document processing completed successfully');
     }
   }
 
@@ -342,14 +357,10 @@ class DocumentProcessor {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      // Check if PDF.js worker is available
-      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        return false;
-      }
-      
       // Check if Tesseract is available
       const tesseractAvailable = typeof Tesseract !== 'undefined';
       
+      // PDF.js will be loaded dynamically when needed
       return tesseractAvailable;
     } catch (error) {
       console.error('Document processor health check failed:', error);

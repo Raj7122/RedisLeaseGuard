@@ -26,7 +26,7 @@ jest.mock('tesseract.js', () => ({
 }))
 
 // Mock Google Generative AI
-jest.mock('@google-ai/generativelanguage', () => ({
+jest.mock('@google/generative-ai', () => ({
   GoogleGenerativeAI: jest.fn().mockImplementation(() => ({
     getGenerativeModel: jest.fn().mockReturnValue({
       embedContent: jest.fn().mockResolvedValue({

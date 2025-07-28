@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.27.1",
-    "@google-ai/generativelanguage": "^3.3.0",
+    "@google/generative-ai": "^0.21.0",
     "@supabase/supabase-js": "^2.53.0",
     "@types/uuid": "^10.0.0",
     "langchain": "^0.3.30",

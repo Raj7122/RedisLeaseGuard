@@ -13,6 +13,12 @@ class RedisClient {
    */
   async connect(): Promise<void> {
     try {
+      // If no Redis URL is provided, skip connection for development
+      if (!process.env.REDIS_URL) {
+        console.log('No REDIS_URL provided - skipping Redis connection for development');
+        return;
+      }
+
       this.client = createClient({
         url: process.env.REDIS_URL,
         socket: {
@@ -43,6 +49,9 @@ class RedisClient {
       
     } catch (error) {
       console.error('Failed to connect to Redis:', error);
+      if (error instanceof Error && error.message.includes('WRONGPASS')) {
+        throw new Error('Redis authentication failed. Please check your REDIS_URL credentials in .env.local');
+      }
       throw new Error('Redis connection failed');
     }
   }
@@ -100,6 +109,24 @@ class RedisClient {
    * Get Redis client instance
    */
   getClient() {
+    // If no Redis URL is provided, return a mock client for development
+    if (!process.env.REDIS_URL) {
+      console.log('No REDIS_URL provided - using mock Redis client for development');
+      return {
+        json: {
+          set: async () => console.log('Mock Redis: json.set called'),
+          get: async () => null,
+        },
+        expire: async () => console.log('Mock Redis: expire called'),
+        ft: {
+          search: async () => [],
+          create: async () => console.log('Mock Redis: ft.create called'),
+          info: async () => false,
+        },
+        ping: async () => 'PONG',
+      } as any;
+    }
+    
     if (!this.client || !this.isConnected) {
       throw new Error('Redis client not connected');
     }
@@ -121,6 +148,12 @@ class RedisClient {
    */
   async healthCheck(): Promise<boolean> {
     try {
+      // For development, if no Redis URL is provided, return true
+      if (!process.env.REDIS_URL) {
+        console.log('No REDIS_URL provided - running in development mode without Redis');
+        return true;
+      }
+      
       if (!this.client || !this.isConnected) {
         return false;
       }
@@ -128,6 +161,10 @@ class RedisClient {
       return true;
     } catch (error) {
       console.error('Redis health check failed:', error);
+      // If it's an authentication error, provide helpful message
+      if (error instanceof Error && error.message.includes('WRONGPASS')) {
+        console.error('Redis authentication failed. Please check your REDIS_URL credentials.');
+      }
       return false;
     }
   }

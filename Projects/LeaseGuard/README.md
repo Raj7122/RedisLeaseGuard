@@ -205,7 +205,7 @@ Content-Type: application/json
 
 ### Health Check
 ```http
-GET /api/upload/health
+GET /api/upload
 ```
 
 ## 🚀 Deployment

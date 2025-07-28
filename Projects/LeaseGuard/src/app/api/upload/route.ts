@@ -83,11 +83,14 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * GET /api/upload/health
+ * GET /api/upload
  * Health check endpoint
  */
 export async function GET() {
   try {
+    // Initialize Redis connection if needed
+    await redisClient.connect();
+    
     // Check Redis connection
     const redisHealthy = await redisClient.healthCheck();
     
