@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import geminiClient from '@/lib/gemini';
 import redisClient from '@/lib/redis';
+import { executeWithErrorHandling } from '@/lib/error-handling';
 
 /**
  * POST /api/chat
@@ -8,9 +9,6 @@ import redisClient from '@/lib/redis';
  */
 export async function POST(request: NextRequest) {
   try {
-    // Initialize Redis connection
-    await redisClient.connect();
-    
     // Parse request body
     const { question, leaseId, sessionId } = await request.json();
     
@@ -20,61 +18,66 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    
-    // Get lease context from Redis
-    const leaseContext = await getLeaseContext(leaseId);
-    if (!leaseContext) {
-      return NextResponse.json(
-        { error: 'Lease not found or expired' },
-        { status: 404 }
-      );
-    }
-    
-    // Get conversation history from Redis
-    const conversationHistory = await getConversationHistory(sessionId || leaseId);
-    
-    // Process question with context
-    const response = await geminiClient.processQuestion(
-      question,
-      leaseContext,
-      conversationHistory
+
+    // Execute chat operation with error handling
+    const result = await executeWithErrorHandling(
+      'chat_operation',
+      'gemini',
+      async () => {
+        // Initialize Redis connection
+        await redisClient.connect();
+        
+        // Get lease context from Redis
+        const leaseContext = await getLeaseContext(leaseId);
+        if (!leaseContext) {
+          throw new Error('Lease not found or expired');
+        }
+        
+        // Get conversation history from Redis
+        const conversationHistory = await getConversationHistory(sessionId || leaseId);
+        
+        // Process question with context
+        const response = await geminiClient.processQuestion(
+          question,
+          leaseContext,
+          conversationHistory
+        );
+        
+        // Store conversation in Redis
+        await storeConversation(sessionId || leaseId, {
+          role: 'user',
+          content: question,
+          timestamp: new Date().toISOString()
+        });
+        
+        await storeConversation(sessionId || leaseId, {
+          role: 'assistant',
+          content: response,
+          timestamp: new Date().toISOString()
+        });
+        
+        return {
+          response,
+          sessionId: sessionId || leaseId,
+          context: {
+            totalClauses: leaseContext.clauses.length,
+            flaggedClauses: leaseContext.clauses.filter(c => c.flagged).length,
+            violations: leaseContext.violations.length
+          }
+        };
+      },
+      { sessionId, userId: sessionId }
     );
-    
-    // Store conversation in Redis
-    await storeConversation(sessionId || leaseId, {
-      role: 'user',
-      content: question,
-      timestamp: new Date().toISOString()
-    });
-    
-    await storeConversation(sessionId || leaseId, {
-      role: 'assistant',
-      content: response,
-      timestamp: new Date().toISOString()
-    });
-    
+
     return NextResponse.json({
       success: true,
-      response,
-      sessionId: sessionId || leaseId,
-      context: {
-        totalClauses: leaseContext.clauses.length,
-        flaggedClauses: leaseContext.clauses.filter(c => c.flagged).length,
-        violations: leaseContext.violations.length
-      }
+      ...result
     });
     
   } catch (error) {
     console.error('Chat API error:', error);
     
     if (error instanceof Error) {
-      if (error.message.includes('Redis connection failed')) {
-        return NextResponse.json(
-          { error: 'Service temporarily unavailable. Please try again.' },
-          { status: 503 }
-        );
-      }
-      
       if (error.message.includes('Lease not found')) {
         return NextResponse.json(
           { error: 'Lease analysis not found. Please upload your document again.' },
@@ -82,10 +85,10 @@ export async function POST(request: NextRequest) {
         );
       }
       
-      if (error.message.includes('Failed to process question')) {
+      if (error.message.includes('Circuit breaker is OPEN')) {
         return NextResponse.json(
-          { error: 'Unable to process your question. Please try again.' },
-          { status: 500 }
+          { error: 'Service temporarily unavailable. Please try again in a moment.' },
+          { status: 503 }
         );
       }
     }

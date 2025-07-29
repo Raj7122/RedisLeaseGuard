@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import documentProcessor from '@/lib/document-processor';
 import redisClient from '@/lib/redis';
+import { executeWithErrorHandling } from '@/lib/error-handling';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -9,9 +10,6 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export async function POST(request: NextRequest) {
   try {
-    // Initialize Redis connection
-    await redisClient.connect();
-    
     // Parse form data
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -35,9 +33,20 @@ export async function POST(request: NextRequest) {
     // Generate unique lease ID
     const leaseId = uuidv4();
     
-    // Process document
-    console.log(`Starting document processing for lease ${leaseId}`);
-    const analysis = await documentProcessor.processDocument(file, leaseId);
+    // Execute document processing with error handling
+    const analysis = await executeWithErrorHandling(
+      'document_processing',
+      'redis',
+      async () => {
+        // Initialize Redis connection
+        await redisClient.connect();
+        
+        // Process document
+        console.log(`Starting document processing for lease ${leaseId}`);
+        return await documentProcessor.processDocument(file, leaseId);
+      },
+      { sessionId: leaseId }
+    );
     
     // Return analysis results
     return NextResponse.json({
@@ -53,13 +62,6 @@ export async function POST(request: NextRequest) {
     
     // Handle specific error types
     if (error instanceof Error) {
-      if (error.message.includes('Redis connection failed')) {
-        return NextResponse.json(
-          { error: 'Service temporarily unavailable. Please try again.' },
-          { status: 503 }
-        );
-      }
-      
       if (error.message.includes('Failed to extract text')) {
         return NextResponse.json(
           { error: 'Unable to read document. Please ensure the file is not corrupted and try again.' },
@@ -71,6 +73,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: error.message },
           { status: 400 }
+        );
+      }
+      
+      if (error.message.includes('Circuit breaker is OPEN')) {
+        return NextResponse.json(
+          { error: 'Service temporarily unavailable. Please try again in a moment.' },
+          { status: 503 }
         );
       }
     }

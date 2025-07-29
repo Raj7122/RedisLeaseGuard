@@ -53,7 +53,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant agrees to pay security deposit equal to two months' rent",
         legal_standard: "Maximum security deposit is one month's rent",
         penalties: "Tenant can recover excess amount plus interest",
-        detection_regex: "(?i)(security\\s+deposit|deposit).*(?:two|2|three|3|four|4).*(month|rent)",
+        detection_regex: "(security\\s+deposit|deposit).*(?:two|2|three|3|four|4).*(month|rent)",
         source: "https://rentguidelinesboard.cityofnewyork.us/resources/faqs/security-deposits/",
         hpd_violation_code: "SEC-DEP-01"
       },
@@ -67,7 +67,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant waives any claims for repairs and maintenance",
         legal_standard: "Landlord cannot waive duty to maintain habitable conditions",
         penalties: "Clause is void; tenant retains all habitability rights",
-        detection_regex: "(?i)(waive|waiver|waiving).*(repair|maintenance|habitab|condition)",
+        detection_regex: "(waive|waiver|waiving).*(repair|maintenance|habitab|condition|claims)|responsible.*all.*repair",
         source: "NY Real Property Law §235-b",
         hpd_violation_code: "HAB-WAIV-01"
       },
@@ -81,7 +81,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Landlord may change locks for non-payment without notice",
         legal_standard: "All evictions must go through court process",
         penalties: "Tenant entitled to damages, attorney fees, and immediate restoration",
-        detection_regex: "(?i)(change\\s+lock|remove\\s+property|self.?help|without.*court)",
+        detection_regex: "(change\\s+lock|remove\\s+property|self.?help|without.*court)",
         source: "RPAPL Article 7",
         hpd_violation_code: "EVICT-SELF-01"
       },
@@ -95,7 +95,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant waives right to contest eviction in court",
         legal_standard: "Constitutional right to due process cannot be waived",
         penalties: "Clause is void and unenforceable",
-        detection_regex: "(?i)(waive|waiver).*(court|legal|proceeding|contest)",
+        detection_regex: "(waive|waiver).*(court|legal|proceeding|contest|right|proceedings)|no.*court.*proceeding|waiving.*legal",
         source: "US Constitution 14th Amendment, NY Constitution",
         hpd_violation_code: "COURT-WAIV-01"
       },
@@ -109,7 +109,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant shall pay landlord's attorney fees in any legal action",
         legal_standard: "Attorney fee clauses must be reciprocal or void",
         penalties: "Clause is void; neither party entitled to attorney fees",
-        detection_regex: "(?i)tenant.*(pay|responsible).*(attorney|legal).*fee(?!.*landlord.*pay)",
+        detection_regex: "tenant.*(pay|responsible).*(attorney|legal).*fee(?!.*landlord.*pay)",
         source: "NY Real Property Law §234",
         hpd_violation_code: "ATTY-FEE-01"
       }
@@ -125,7 +125,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Rent may be increased at any time with 15 days notice",
         legal_standard: "30 days notice required; stabilized units have increase limits",
         penalties: "Illegal increases must be refunded with interest",
-        detection_regex: "(?i)rent.*increas.*(?:15|1-5|immediate|any\\s+time)",
+        detection_regex: "rent.*increas.*(?:15|1-5|immediate|any\\s+time)",
         source: "NYC Rent Guidelines Board regulations",
         hpd_violation_code: "RENT-INC-01"
       },
@@ -139,7 +139,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "No children under 12 permitted in apartment",
         legal_standard: "Cannot discriminate based on protected classes",
         penalties: "Civil penalties up to $250,000, compensatory damages",
-        detection_regex: "(?i)(no\\s+children|adults\\s+only|single\\s+person|race|religion|national)",
+        detection_regex: "(no\\s+children|adults\\s+only|single\\s+person|race|religion|national|families.*children)",
         source: "NYC Human Rights Law §8-107",
         hpd_violation_code: "DISCRIM-01"
       },
@@ -153,7 +153,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Landlord may enter apartment at any time for inspections",
         legal_standard: "Reasonable notice required except for emergencies",
         penalties: "Tenant entitled to damages for privacy violation",
-        detection_regex: "(?i)(enter|access).*(?:any\\s+time|without\\s+notice|immediate)",
+        detection_regex: "(enter|access).*(?:any\\s+time|without\\s+notice|immediate)",
         source: "NY Real Property Law §235-f",
         hpd_violation_code: "ENTRY-01"
       },
@@ -167,7 +167,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Landlord may refuse lease renewal for any reason",
         legal_standard: "Good cause required for non-renewal in stabilized units",
         penalties: "Tenant entitled to lease renewal and damages",
-        detection_regex: "(?i)(refuse|deny).*renewal.*(?:any\\s+reason|no\\s+cause)",
+        detection_regex: "(refuse|deny).*renewal.*(?:any\\s+reason|no\\s+cause)",
         source: "9 NYCRR 2524.3",
         hpd_violation_code: "RENEW-01"
       }
@@ -183,7 +183,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Late fee of $100 per day after 5 days late",
         legal_standard: "Late fees must be reasonable and not punitive",
         penalties: "Excessive fees may be deemed unenforceable",
-        detection_regex: "(?i)late\\s+fee.*(?:per\\s+day|\\$\\d{2,}|compound)",
+        detection_regex: "late\\s+fee.*(?:per\\s+day|\\$\\d{2,}|compound)",
         source: "NY General Obligations Law §5-501",
         hpd_violation_code: "LATE-FEE-01"
       },
@@ -197,7 +197,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Subletting is strictly prohibited under all circumstances",
         legal_standard: "Stabilized tenants have limited right to sublet",
         penalties: "Clause is void in stabilized apartments",
-        detection_regex: "(?i)sublet.*(?:prohibited|forbidden|not\\s+allowed|strictly)",
+        detection_regex: "sublet.*(?:prohibited|forbidden|not\\s+allowed|strictly)",
         source: "NY Real Property Law §226-b",
         hpd_violation_code: "SUBLET-01"
       },
@@ -211,7 +211,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "No overnight guests permitted for more than 2 nights per month",
         legal_standard: "Reasonable guest policies allowed, but not excessive restrictions",
         penalties: "Unenforceable if deemed unreasonable",
-        detection_regex: "(?i)guest.*(?:prohibit|not\\s+permit|2\\s+night|no\\s+overnight)",
+        detection_regex: "guest.*(?:prohibit|not\\s+permit|2\\s+night|no\\s+overnight)",
         source: "Implied covenant of quiet enjoyment",
         hpd_violation_code: "GUEST-01"
       },
@@ -225,7 +225,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Monthly pet fee of $50 for any pets",
         legal_standard: "No additional fees allowed in stabilized units beyond rent",
         penalties: "Fees must be refunded",
-        detection_regex: "(?i)pet\\s+fee|additional.*pet.*charge",
+        detection_regex: "pet\\s+fee|additional.*pet.*charge",
         source: "9 NYCRR 2520.6",
         hpd_violation_code: "PET-FEE-01"
       },
@@ -239,7 +239,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant responsible for all utilities including heat",
         legal_standard: "Cannot reduce services in stabilized units without DHCR approval",
         penalties: "Service reduction order, rent reduction",
-        detection_regex: "(?i)tenant.*responsible.*(?:heat|hot\\s+water|all\\s+utilit)",
+        detection_regex: "tenant.*responsible.*(?:heat|hot\\s+water|all\\s+utilit)",
         source: "9 NYCRR 2523.4",
         hpd_violation_code: "UTIL-01"
       },
@@ -253,7 +253,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Lease may not be assigned under any circumstances",
         legal_standard: "Assignment rights exist in stabilized units with conditions",
         penalties: "Prohibition is void and unenforceable",
-        detection_regex: "(?i)assign.*(?:prohibit|not\\s+allow|forbidden)",
+        detection_regex: "assign.*(?:prohibit|not\\s+allow|forbidden)",
         source: "9 NYCRR 2524.3",
         hpd_violation_code: "ASSIGN-01"
       },
@@ -267,7 +267,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant must carpet 80% of apartment floors",
         legal_standard: "Landlord cannot require tenant-funded alterations",
         penalties: "Requirement is unenforceable",
-        detection_regex: "(?i)tenant.*(?:install|carpet|floor).*expense",
+        detection_regex: "tenant.*(?:install|carpet|floor).*expense",
         source: "Lease alteration principles",
         hpd_violation_code: "CARPET-01"
       },
@@ -281,7 +281,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Tenant must carry $1 million liability insurance",
         legal_standard: "Insurance requirements must be reasonable",
         penalties: "Excessive requirements may be unenforceable",
-        detection_regex: "(?i)tenant.*insurance.*(?:\\$\\d{6,}|million|excessive)",
+        detection_regex: "tenant.*insurance.*(?:\\$\\d{6,}|million|excessive)",
         source: "Contract unconscionability doctrine",
         hpd_violation_code: "INSUR-01"
       },
@@ -295,7 +295,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Either party may terminate with 15 days notice",
         legal_standard: "30 days notice required for month-to-month tenancies",
         penalties: "Termination invalid without proper notice",
-        detection_regex: "(?i)terminat.*(?:15|1-5|immediate|10)\\s+day",
+        detection_regex: "terminat.*(?:15|1-5|immediate|10)\\s+day",
         source: "NY Real Property Law §232-a",
         hpd_violation_code: "TERM-NOT-01"
       },
@@ -309,7 +309,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "No additional persons may reside in apartment",
         legal_standard: "Tenant has right to roommate subject to reasonable restrictions",
         penalties: "Excessive restrictions are unenforceable",
-        detection_regex: "(?i)(?:no.*roommate|additional.*person.*prohibit)",
+        detection_regex: "(?:no.*roommate|additional.*person.*prohibit)",
         source: "NY Real Property Law §235-f",
         hpd_violation_code: "ROOMM-01"
       },
@@ -323,7 +323,7 @@ export const housingLawDatabase: HousingLawDatabase = {
         example_illegal_clause: "Parties waive right to jury trial in all disputes",
         legal_standard: "Jury trial rights generally cannot be waived in residential leases",
         penalties: "Waiver may be deemed unenforceable",
-        detection_regex: "(?i)waive.*jury\\s+trial",
+        detection_regex: "waive.*jury\\s+trial",
         source: "NY Constitution Article 1 §2",
         hpd_violation_code: "JURY-01"
       }
@@ -352,8 +352,9 @@ export function getViolationPatternsBySeverity(severity: ViolationPattern['sever
     case 'High':
       return housingLawDatabase.violations.high_severity_violations;
     case 'Medium':
+      return housingLawDatabase.violations.medium_low_violations.filter(v => v.severity === 'Medium');
     case 'Low':
-      return housingLawDatabase.violations.medium_low_violations.filter(v => v.severity === severity);
+      return housingLawDatabase.violations.medium_low_violations.filter(v => v.severity === 'Low');
     default:
       return [];
   }

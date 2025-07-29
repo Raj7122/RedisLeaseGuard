@@ -12,6 +12,9 @@ const customJestConfig = {
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(isows|@supabase|@supabase/supabase-js|@supabase/realtime-js|@supabase/postgrest-js|@supabase/storage-js|@supabase/functions-js|@supabase/auth-js|@supabase/node-fetch)/)',
+  ],
   testMatch: [
     '**/__tests__/**/*.test.(ts|tsx|js)',
     '**/*.(test|spec).(ts|tsx|js)'
