@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sessionManager, AnalyticsData, PerformanceData, ErrorData } from '@/lib/session-management';
+import { getSessionManager, AnalyticsData, PerformanceData, ErrorData } from '@/lib/session-management';
 
 /**
  * Analytics API Endpoints
@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
     };
 
     // Track analytics
+    const sessionManager = getSessionManager();
     await sessionManager.trackAnalytics(analyticsData);
 
     return NextResponse.json({
@@ -119,6 +120,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Generate analytics report
+    const sessionManager = getSessionManager();
     const report = await sessionManager.generateAnalyticsReport(startDate, endDate);
 
     if (!report) {

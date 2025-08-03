@@ -104,8 +104,18 @@ class SessionManager {
       process.env.SUPABASE_SERVICE_ROLE_KEY || ''
     );
 
-    // Initialize Redis client
-    this.redis = redisClient.getClient();
+    // Initialize Redis client lazily - don't call getClient() in constructor
+    this.redis = null;
+  }
+
+  /**
+   * Get Redis client with lazy initialization
+   */
+  private async getRedisClient() {
+    if (!this.redis) {
+      this.redis = await redisClient.getClient();
+    }
+    return this.redis;
   }
 
   /**
@@ -137,8 +147,9 @@ class SessionManager {
 
     try {
       // Store session in Redis for fast access
-      await this.redis.json.set(`session:${sessionId}`, '.', sessionData);
-      await this.redis.expire(`session:${sessionId}`, this.SESSION_TTL);
+      const redis = await this.getRedisClient();
+      await redis.json.set(`session:${sessionId}`, '.', sessionData);
+      await redis.expire(`session:${sessionId}`, this.SESSION_TTL);
 
       // Store session in Supabase for analytics
       await this.supabase.from('sessions').insert(sessionData);
@@ -164,17 +175,38 @@ class SessionManager {
    */
   async logActivity(sessionId: string, activity: ActivityData): Promise<void> {
     try {
-      // Log activity to Redis Stream for real-time processing
-      await this.redis.xadd(
-        `session:${sessionId}:activities`,
-        '*',
-        'type', activity.type,
-        'timestamp', activity.timestamp,
-        'metadata', JSON.stringify(activity.metadata)
-      );
-
-      // Set TTL for activity stream
-      await this.redis.expire(`session:${sessionId}:activities`, this.ACTIVITY_TTL);
+      const redis = await this.getRedisClient();
+      
+      // Try Redis Streams first, fallback to simple list if not available
+      try {
+        if (typeof redis.xadd === 'function') {
+          await redis.xadd(
+            `session:${sessionId}:activities`,
+            '*',
+            'type', activity.type,
+            'timestamp', activity.timestamp,
+            'metadata', JSON.stringify(activity.metadata)
+          );
+          
+          // Set TTL for activity stream
+          await redis.expire(`session:${sessionId}:activities`, this.ACTIVITY_TTL);
+        } else {
+          // Fallback to simple list storage
+          await redis.lpush(
+            `session:${sessionId}:activities`,
+            JSON.stringify(activity)
+          );
+          await redis.expire(`session:${sessionId}:activities`, this.ACTIVITY_TTL);
+        }
+      } catch (redisError) {
+        console.warn('Redis Streams not available, using fallback storage:', redisError);
+        // Fallback to simple list storage
+        await redis.lpush(
+          `session:${sessionId}:activities`,
+          JSON.stringify(activity)
+        );
+        await redis.expire(`session:${sessionId}:activities`, this.ACTIVITY_TTL);
+      }
 
       // Store activity in Supabase for analytics
       await this.supabase.from('session_activities').insert({
@@ -236,7 +268,8 @@ class SessionManager {
    */
   async getSession(sessionId: string): Promise<SessionData | null> {
     try {
-      const sessionData = await this.redis.json.get(`session:${sessionId}`);
+      const redis = await this.getRedisClient();
+      const sessionData = await redis.json.get(`session:${sessionId}`);
       return sessionData;
     } catch (error) {
       console.error('Failed to get session:', error);
@@ -245,24 +278,40 @@ class SessionManager {
   }
 
   /**
-   * Get session activities from Redis Stream
+   * Get session activities from Redis Stream or fallback storage
    * @param sessionId - Session identifier
    * @returns Array of activity data
    */
   async getSessionActivities(sessionId: string): Promise<ActivityData[]> {
     try {
-      const activities = await this.redis.xrange(`session:${sessionId}:activities`, '-', '+');
-      return activities.map(([id, fields]: [string, string[]]) => {
-        const activity: any = {};
-        for (let i = 0; i < fields.length; i += 2) {
-          activity[fields[i]] = fields[i + 1];
+      const redis = await this.getRedisClient();
+      
+      // Try Redis Streams first, fallback to simple list if not available
+      try {
+        if (typeof redis.xrange === 'function') {
+          const activities = await redis.xrange(`session:${sessionId}:activities`, '-', '+');
+          return activities.map(([id, fields]: [string, string[]]) => {
+            const activity: any = {};
+            for (let i = 0; i < fields.length; i += 2) {
+              activity[fields[i]] = fields[i + 1];
+            }
+            return {
+              type: activity.type,
+              timestamp: activity.timestamp,
+              metadata: JSON.parse(activity.metadata || '{}')
+            };
+          });
+        } else {
+          // Fallback to simple list storage
+          const activities = await redis.lrange(`session:${sessionId}:activities`, 0, -1);
+          return activities.map((activityStr: string) => JSON.parse(activityStr));
         }
-        return {
-          type: activity.type,
-          timestamp: activity.timestamp,
-          metadata: JSON.parse(activity.metadata || '{}')
-        };
-      });
+      } catch (redisError) {
+        console.warn('Redis Streams not available, using fallback storage:', redisError);
+        // Fallback to simple list storage
+        const activities = await redis.lrange(`session:${sessionId}:activities`, 0, -1);
+        return activities.map((activityStr: string) => JSON.parse(activityStr));
+      }
     } catch (error) {
       console.error('Failed to get session activities:', error);
       return [];
@@ -277,7 +326,8 @@ class SessionManager {
   async updateSessionStatus(sessionId: string, status: SessionData['status']): Promise<void> {
     try {
       // Update in Redis
-      await this.redis.json.set(`session:${sessionId}`, '.status', status);
+      const redis = await this.getRedisClient();
+      await redis.json.set(`session:${sessionId}`, '.status', status);
 
       // Update in Supabase
       await this.supabase.from('sessions')
@@ -306,8 +356,9 @@ class SessionManager {
       if (expiredSessions) {
         for (const session of expiredSessions) {
           // Clean up Redis data
-          await this.redis.del(`session:${session.id}`);
-          await this.redis.del(`session:${session.id}:activities`);
+          const redis = await this.getRedisClient();
+          await redis.del(`session:${session.id}`);
+          await redis.del(`session:${session.id}:activities`);
 
           // Update status in Supabase
           await this.supabase.from('sessions')
@@ -478,7 +529,18 @@ class SessionManager {
 }
 
 // Export singleton instance
-export const sessionManager = new SessionManager();
+// Lazy initialization to avoid Redis connection issues during module loading
+let _sessionManager: SessionManager | null = null;
+
+export function getSessionManager(): SessionManager {
+  if (!_sessionManager) {
+    _sessionManager = new SessionManager();
+  }
+  return _sessionManager;
+}
+
+// For backward compatibility
+export const sessionManager = getSessionManager();
 
 // Export types for external use
 export type {

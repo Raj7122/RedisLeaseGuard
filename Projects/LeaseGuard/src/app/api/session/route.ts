@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sessionManager } from '@/lib/session-management';
+import { getSessionManager } from '@/lib/session-management';
 
 /**
  * Session Management API Endpoints
@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create new session
+    const sessionManager = getSessionManager();
     const session = await sessionManager.createSession(userAgent, ipAddress, userId);
 
     return NextResponse.json({
@@ -86,6 +87,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get session data
+    const sessionManager = getSessionManager();
     const session = await sessionManager.getSession(sessionId);
 
     if (!session) {
@@ -136,6 +138,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update session status
+    const sessionManager = getSessionManager();
     await sessionManager.updateSessionStatus(sessionId, status);
 
     return NextResponse.json({

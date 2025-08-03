@@ -21,7 +21,7 @@
  * - Your-Focused: User experience maintained during errors
  */
 
-import { sessionManager } from './session-management';
+import { getSessionManager } from './session-management';
 
 // Error severity levels
 export enum ErrorSeverity {
@@ -212,6 +212,7 @@ export class RetryManager {
    */
   private async trackRetryAttempt(context: ErrorContext, attempt: number, delay: number): Promise<void> {
     try {
+      const sessionManager = getSessionManager();
       await sessionManager.trackAnalytics({
         eventType: 'retry_attempt',
         sessionId: context.sessionId || 'system',
@@ -247,6 +248,7 @@ export class RetryManager {
         resolved: false
       };
 
+      const sessionManager = getSessionManager();
       await sessionManager.trackError({
         eventType: 'error',
         sessionId: context.sessionId || 'system',
@@ -466,6 +468,7 @@ export class FallbackManager {
    */
   private async trackFallbackUsage(operation: string, context: ErrorContext): Promise<void> {
     try {
+      const sessionManager = getSessionManager();
       await sessionManager.trackAnalytics({
         eventType: 'fallback_used',
         sessionId: context.sessionId || 'system',
@@ -589,6 +592,7 @@ export class PerformanceMonitor {
    */
   private async alertSlowResponse(responseTime: number): Promise<void> {
     try {
+      const sessionManager = getSessionManager();
       await sessionManager.trackAnalytics({
         eventType: 'performance_alert',
         sessionId: 'system',
@@ -670,8 +674,11 @@ export class SystemHealthMonitor {
   private async checkRedis(): Promise<{ status: string; responseTime: number }> {
     const startTime = Date.now();
     try {
-      const { redisClient } = await import('./redis');
-      await redisClient.ping();
+      const redisClient = await import('./redis');
+      // Ensure Redis client is connected
+      await redisClient.default.connect();
+      const client = redisClient.default.getClient();
+      await client.ping();
       const responseTime = Date.now() - startTime;
       return { status: 'healthy', responseTime };
     } catch (error) {
@@ -685,10 +692,20 @@ export class SystemHealthMonitor {
   private async checkGemini(): Promise<{ status: string; responseTime: number }> {
     const startTime = Date.now();
     try {
-      const { geminiClient } = await import('./gemini');
-      await geminiClient.generateContent({
-        contents: [{ role: 'user', parts: [{ text: 'ping' }] }]
-      });
+      // Check if the API key is available
+      const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return { status: 'unhealthy', responseTime: Date.now() - startTime };
+      }
+
+      // Try to create a simple Gemini client instance
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      
+      // Simple health check
+      await model.generateContent('ping');
+      
       const responseTime = Date.now() - startTime;
       return { status: 'healthy', responseTime };
     } catch (error) {
@@ -849,6 +866,7 @@ export class ErrorHandler {
       console.error('CRITICAL ERROR ALERT:', errorData);
       
       // Track critical errors
+      const sessionManager = getSessionManager();
       await sessionManager.trackError({
         eventType: 'critical_error_alert',
         sessionId: errorData.context.sessionId || 'system',

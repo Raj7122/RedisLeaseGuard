@@ -30,7 +30,27 @@ export async function POST(request: NextRequest) {
         // Get lease context from Redis
         const leaseContext = await getLeaseContext(leaseId);
         if (!leaseContext) {
-          throw new Error('Lease not found or expired');
+          console.log(`Lease context not found for ${leaseId}, providing fallback response`);
+          // Provide a fallback response instead of throwing error
+          const fallbackResponse = {
+            response: "I don't have access to your lease document at the moment. Please upload your lease document first, and then I'll be able to help you with your questions about it.",
+            sessionId
+          };
+          
+          // Store the fallback response in conversation history
+          await storeConversation(sessionId, {
+            role: 'user',
+            content: question,
+            timestamp: new Date().toISOString()
+          });
+          
+          await storeConversation(sessionId, {
+            role: 'assistant',
+            content: fallbackResponse.response,
+            timestamp: new Date().toISOString()
+          });
+          
+          return NextResponse.json(fallbackResponse);
         }
         
         // Get conversation history from Redis
@@ -142,11 +162,15 @@ export async function GET(request: NextRequest) {
  */
 async function getLeaseContext(leaseId: string) {
   try {
-    const redis = redisClient.getClient();
+    const redis = await redisClient.getClient();
     
     // Get lease metadata
+    console.log(`Retrieving lease context: lease:${leaseId}`);
     const leaseData = await redis.json.get(`lease:${leaseId}`);
+    console.log(`Lease data retrieved:`, leaseData);
+    
     if (!leaseData) {
+      console.log(`No lease data found for: lease:${leaseId}`);
       return null;
     }
     
@@ -155,9 +179,12 @@ async function getLeaseContext(leaseId: string) {
     const clauses = [];
     const violations = [];
     
+    console.log(`Found ${clauseKeys.length} clause keys for lease ${leaseId}`);
+    
     for (const key of clauseKeys) {
       const clauseData = await redis.json.get(key);
       if (clauseData) {
+        console.log(`Processing clause: ${clauseData.text.substring(0, 100)}...`);
         clauses.push({
           text: clauseData.text,
           flagged: clauseData.metadata.flagged,
@@ -173,6 +200,8 @@ async function getLeaseContext(leaseId: string) {
         }
       }
     }
+    
+    console.log(`Retrieved ${clauses.length} clauses and ${violations.length} violations`);
     
     return {
       clauses,
@@ -190,10 +219,12 @@ async function getLeaseContext(leaseId: string) {
  */
 async function getConversationHistory(sessionId: string) {
   try {
-    const redis = redisClient.getClient();
+    const redis = await redisClient.getClient();
     const historyKey = `conversation:${sessionId}`;
     
+    console.log(`Retrieving conversation history: ${historyKey}`);
     const history = await redis.lrange(historyKey, 0, -1);
+    console.log(`Conversation history retrieved:`, history);
     
     return history.map(item => JSON.parse(item));
     
@@ -212,8 +243,10 @@ async function storeConversation(sessionId: string, message: {
   timestamp: string;
 }) {
   try {
-    const redis = redisClient.getClient();
+    const redis = await redisClient.getClient();
     const historyKey = `conversation:${sessionId}`;
+    
+    console.log(`Storing conversation message: ${historyKey}`, message);
     
     // Add message to conversation history
     await redis.lpush(historyKey, JSON.stringify(message));
@@ -224,6 +257,7 @@ async function storeConversation(sessionId: string, message: {
     // Set expiration for 7 days
     await redis.expire(historyKey, 7 * 24 * 60 * 60);
     
+    console.log(`Successfully stored conversation message for session: ${sessionId}`);
   } catch (error) {
     console.error('Error storing conversation:', error);
   }

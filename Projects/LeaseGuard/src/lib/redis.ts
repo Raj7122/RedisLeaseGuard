@@ -7,15 +7,36 @@ import { createClient } from 'redis';
 class RedisClient {
   private client: ReturnType<typeof createClient> | null = null;
   private isConnected = false;
+  private connectionPromise: Promise<void> | null = null;
 
   /**
    * Initialize Redis client with vector search capabilities
    */
   async connect(): Promise<void> {
+    // If already connecting, wait for that connection
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+
+    // If already connected, return immediately
+    if (this.isConnected && this.client) {
+      return;
+    }
+
+    this.connectionPromise = this._connect();
+    try {
+      await this.connectionPromise;
+    } finally {
+      this.connectionPromise = null;
+    }
+  }
+
+  private async _connect(): Promise<void> {
     try {
       // If no Redis URL is provided, skip connection for development
       if (!process.env.REDIS_URL) {
         console.log('No REDIS_URL provided - skipping Redis connection for development');
+        this.isConnected = true; // Mark as connected to use mock client
         return;
       }
 
@@ -24,6 +45,13 @@ class RedisClient {
         socket: {
           connectTimeout: 10000,
           lazyConnect: true,
+          reconnectStrategy: (retries) => {
+            if (retries > 10) {
+              console.error('Redis connection failed after 10 retries');
+              return new Error('Redis connection failed');
+            }
+            return Math.min(retries * 100, 3000);
+          },
         },
       });
 
@@ -42,6 +70,11 @@ class RedisClient {
         console.log('Redis Client Ready');
       });
 
+      this.client.on('end', () => {
+        console.log('Redis Client Disconnected');
+        this.isConnected = false;
+      });
+
       await this.client.connect();
       
       // Initialize vector search index if it doesn't exist
@@ -49,6 +82,8 @@ class RedisClient {
       
     } catch (error) {
       console.error('Failed to connect to Redis:', error);
+      this.isConnected = false;
+      
       if (error instanceof Error && error.message.includes('WRONGPASS')) {
         throw new Error('Redis authentication failed. Please check your REDIS_URL credentials in .env.local');
       }
@@ -100,36 +135,98 @@ class RedisClient {
         console.log('Vector search index created successfully');
       }
     } catch (error) {
-      console.error('Error initializing vector index:', error);
-      // Don't throw - index might already exist
+      console.log('Error initializing vector index:', error);
+      console.log('Vector search will be disabled - this is normal for basic Redis instances');
+      // Don't throw - continue without vector search
     }
   }
 
   /**
-   * Get Redis client instance
+   * Get Redis client instance with automatic connection
    */
-  getClient() {
+  // Global mock storage for development
+  private static mockStorage = new Map<string, any>();
+  private static mockLists = new Map<string, string[]>();
+
+  async getClient() {
     // If no Redis URL is provided, return a mock client for development
     if (!process.env.REDIS_URL) {
       console.log('No REDIS_URL provided - using mock Redis client for development');
+      
+      // Use global mock storage to persist data between calls
+      const mockStorage = RedisClient.mockStorage;
+      const mockLists = RedisClient.mockLists;
+      
       return {
         json: {
-          set: async () => console.log('Mock Redis: json.set called'),
-          get: async () => null,
+          set: async (key: string, path: string, value: any) => {
+            console.log(`Mock Redis: json.set ${key} ${path}`);
+            mockStorage.set(key, value);
+            return 'OK';
+          },
+          get: async (key: string) => {
+            console.log(`Mock Redis: json.get ${key}`);
+            return mockStorage.get(key) || null;
+          },
         },
-        expire: async () => console.log('Mock Redis: expire called'),
+        expire: async (key: string, seconds: number) => {
+          console.log(`Mock Redis: expire ${key} ${seconds}`);
+          return 1;
+        },
         ft: {
           search: async () => [],
           create: async () => console.log('Mock Redis: ft.create called'),
           info: async () => false,
         },
         ping: async () => 'PONG',
+        lpush: async (key: string, value: string) => {
+          console.log(`Mock Redis: lpush ${key} ${value}`);
+          if (!mockLists.has(key)) {
+            mockLists.set(key, []);
+          }
+          const list = mockLists.get(key)!;
+          list.unshift(value);
+          return list.length;
+        },
+        lrange: async (key: string, start: number, end: number) => {
+          console.log(`Mock Redis: lrange ${key} ${start} ${end}`);
+          const list = mockLists.get(key) || [];
+          if (end === -1) end = list.length - 1;
+          return list.slice(start, end + 1);
+        },
+        ltrim: async (key: string, start: number, end: number) => {
+          console.log(`Mock Redis: ltrim ${key} ${start} ${end}`);
+          const list = mockLists.get(key) || [];
+          if (end === -1) end = list.length - 1;
+          const trimmed = list.slice(start, end + 1);
+          mockLists.set(key, trimmed);
+          return 'OK';
+        },
+        xadd: async () => console.log('Mock Redis: xadd called'),
+        xrange: async () => [],
+        keys: async (pattern: string) => {
+          console.log(`Mock Redis: keys ${pattern}`);
+          const keys: string[] = [];
+          for (const key of mockStorage.keys()) {
+            if (key.includes(pattern.replace('*', ''))) {
+              keys.push(key);
+            }
+          }
+          return keys;
+        },
       } as any;
     }
     
-    if (!this.client || !this.isConnected) {
-      throw new Error('Redis client not connected');
+    // Ensure we're connected
+    if (!this.isConnected || !this.client) {
+      await this.connect();
     }
+    
+    // Double-check connection after connect attempt
+    if (!this.client || !this.isConnected) {
+      throw new Error('Redis client not connected after connection attempt');
+    }
+    
     return this.client;
   }
 
