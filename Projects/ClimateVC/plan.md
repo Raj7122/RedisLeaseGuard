@@ -27,19 +27,28 @@
 * **Component Library:** Streamlit native components with custom CSS styling
 * **Design Methodology:** Component-driven development with atomic design principles
 * **UX Principles Applied:**
-  * **Fitts's Law Implementation:** Large, easily clickable filter buttons and card elements
-  * **Hick's Law Application:** Simplified filter categories (sector, geography, investor, stage)
-  * **Miller's Rule Adherence:** Information chunked into digestible cards (7±2 items per view)
-  * **Jakob's Law Compliance:** Familiar data table and card layouts users expect
-  * **Krug's Usability Principles:** Self-evident interface with clear labeling and minimal cognitive load
-* **Accessibility Standard:** WCAG 2.1 AA compliance
-* **Responsive Strategy:** Desktop-first with mobile adaptation
-* **Information Architecture:** Flat navigation with sidebar filtering
+  * **Fitts's Law Implementation:** Large, easily clickable filter buttons and card elements (44px minimum touch targets)
+  * **Hick's Law Application:** Simplified filter categories (sector, geography, investor, stage) with familiar LinkedIn/Crunchbase patterns
+  * **Miller's Rule Adherence:** Information chunked into digestible cards (3-5 high-value fields visible at glance)
+  * **Jakob's Law Compliance:** Familiar data table and card layouts users expect from professional platforms
+  * **Krug's Usability Principles:** Self-evident interface with clear labeling and minimal cognitive load for research workflows
+* **Accessibility Standard:** WCAG 2.1 AA compliance with semantic components and contrast-friendly design
+* **Responsive Strategy:** Desktop-first with mobile-adaptive design (read-only mobile views)
+* **Information Architecture:** Sidebar filtering + top bar for global actions (search, dashboard, settings)
 * **Color System:** 
   * Primary: #2E8B57 (Sea Green - climate theme)
-  * Secondary: #20B2AA (Light Sea Green)
-  * Neutral: #F5F5F5 (Light Gray), #333333 (Dark Gray)
-* **Typography:** System fonts with clear hierarchy for data readability
+  * Accent: #20B2AA (Light Sea Green)
+  * Neutral: #f8f9fa (Soft Gray), #2e2e2e (Charcoal)
+  * Background: #ffffff (White)
+  * Text: #2e2e2e (Charcoal), #6c757d (Secondary Text)
+* **Typography:** Inter, Open Sans, or Source Sans Pro for clean, modern readability
+* **Content Hierarchy:**
+  * **Primary Fields:** startup_name, amount_usd, funding_stage
+  * **Secondary Fields:** investors, announcement_date, location, sector
+  * **Progressive Disclosure:** Expandable rows/cards for full investor list, source links, raw snippets
+* **Data Visualization:** Clean bar charts and time series for funding trends, pie/donut for categorical distributions
+* **Navigation Pattern:** Flat sidebar filtering with persistent top bar (no tabs or nested menus)
+* **Cognitive Load Strategy:** Speed and scannability prioritized, batch workflows supported, keyboard shortcuts planned for future
 
 ### **Security & Threat Model:**
 * **Authentication:** None required (public data access)
@@ -79,11 +88,15 @@
   - **Description:** Create responsive web interface with funding event cards, filtering sidebar, and export functionality
   - **Success Criteria:** UI functional, responsive design, all user journeys working
   - **Testing Strategy:** UI component tests, user flow testing, accessibility validation
+  - **UI Components:** Top navigation bar, sidebar filters, funding event cards, data table view
+  - **Design Implementation:** Custom CSS for climate theme, WCAG 2.1 AA compliance, mobile-adaptive layout
 
 - [ ] **Task 6: Data Export & Visualization**
   - **Description:** Implement CSV export functionality and basic dashboard visualizations
   - **Success Criteria:** Export working, visualizations displaying correctly, dashboard functional
   - **Testing Strategy:** Export format validation, visualization accuracy tests
+  - **Visualization Components:** Funding trends bar chart, sector distribution donut chart, geographic heatmap
+  - **Dashboard Layout:** Clean, scannable design with 3-5 key metrics visible at glance
 
 - [ ] **Task 7: Error Handling & Resilience**
   - **Description:** Implement comprehensive error handling, logging, and graceful failure recovery
@@ -100,6 +113,86 @@
 * **Data Processing:** NLP entity extraction using Gemini Flash 1.5 + spaCy
 * **Storage Strategy:** SQLite for structured data, CSV for backup and export
 * **Data Quality:** Deduplication, normalization, confidence scoring
+
+## 4.1 UI Component Specifications
+
+### **Layout Components:**
+* **Top Navigation Bar:** 
+  - Logo/Brand (left)
+  - Global search bar (center)
+  - Dashboard link, Settings, Export button (right)
+  - Height: 60px, background: #ffffff, border-bottom: 1px solid #e9ecef
+
+* **Sidebar Filter Panel:**
+  - Width: 280px (collapsible to 60px)
+  - Background: #f8f9fa
+  - Filter sections: Funding Stage, Sector, Geography, Investor, Date Range
+  - Apply/Reset buttons at bottom
+
+* **Main Content Area:**
+  - Flexible width (responsive to sidebar)
+  - Padding: 24px
+  - Background: #ffffff
+
+### **Data Display Components:**
+* **Funding Event Cards:**
+  - Layout: Horizontal cards with expandable details
+  - Primary info: Startup name (bold), Amount (highlighted), Stage (badge)
+  - Secondary info: Investors (truncated), Date, Location, Sector
+  - Expandable: Full investor list, source links, raw data snippet
+  - Hover effects: Subtle shadow and border highlight
+
+* **Data Table (Alternative View):**
+  - Sortable columns: Startup, Amount, Stage, Date, Location
+  - Row highlighting on hover
+  - Expandable rows for detailed information
+
+### **Filter Components:**
+* **Multi-Select Dropdowns:**
+  - Max height: 200px with scroll
+  - Search within options
+  - Selected items displayed as chips/tags
+  - Clear all option
+
+* **Date Range Picker:**
+  - Preset ranges: Last 30 days, Last 3 months, Last year, Custom
+  - Date inputs with calendar picker
+
+* **Search Bar:**
+  - Global search across startup names, investors, sectors
+  - Autocomplete suggestions
+  - Search history (local storage)
+
+### **Visualization Components:**
+* **Funding Trends Chart:**
+  - Bar chart showing funding amounts over time
+  - X-axis: Months/quarters, Y-axis: Total funding amount
+  - Interactive tooltips with detailed information
+
+* **Sector Distribution:**
+  - Donut chart showing funding distribution by sector
+  - Hover effects with percentage and amount details
+
+* **Geographic Heatmap:**
+  - Simple bar chart of funding by region/country
+  - Color-coded by funding amount
+
+### **Interactive Elements:**
+* **Buttons:**
+  - Primary: #2E8B57 background, white text
+  - Secondary: Transparent with #2E8B57 border and text
+  - Hover states with opacity changes
+  - Minimum 44px height for accessibility
+
+* **Badges/Tags:**
+  - Funding stage badges with color coding
+  - Sector tags with subtle background colors
+  - Investor chips with hover tooltips
+
+### **Responsive Breakpoints:**
+* **Desktop:** > 1024px (full sidebar, detailed cards)
+* **Tablet:** 768px - 1024px (collapsed sidebar, medium cards)
+* **Mobile:** < 768px (minimal sidebar, compact cards, read-only)
 
 ## 5. Security Implementation Plan
 * **Input Validation:** All user inputs sanitized and validated
