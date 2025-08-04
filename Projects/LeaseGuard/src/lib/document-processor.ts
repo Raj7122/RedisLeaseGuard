@@ -1,6 +1,7 @@
 import Tesseract from 'tesseract.js';
 import geminiClient from './gemini';
 import redisClient from './redis';
+import timeSeriesManager, { TIMESERIES_KEYS } from './timeseries-manager';
 import { ViolationPattern, getAllViolationPatterns, findViolationPatternById } from './housing-law-database';
 
 // PDF.js will be imported dynamically when needed
@@ -48,6 +49,7 @@ export interface LeaseAnalysis {
  */
 class DocumentProcessor {
   private currentSessionId: string | null = null;
+  private currentFileType: string | null = null;
 
   /**
    * Set current session ID for event tracking
@@ -108,24 +110,71 @@ class DocumentProcessor {
   }
 
   /**
-   * Track processing metrics using Redis TimeSeries
+   * Track processing metrics using enhanced Redis TimeSeries
+   * Automated: Comprehensive metrics collection with labels
    */
   private async trackProcessingMetrics(operation: string, duration: number, success: boolean) {
     try {
       const timestamp = Date.now();
+      const sessionId = this.currentSessionId || 'anonymous';
       
-      // Track processing time
-      await redisClient.addTimeSeriesData(`processing_time:${operation}`, timestamp, duration);
+      // Initialize TimeSeries manager
+      await timeSeriesManager.initialize();
+      
+      // Track processing time with detailed labels
+      await timeSeriesManager.addMetric(
+        `processing_time:${operation}`,
+        duration,
+        {
+          operation,
+          sessionId,
+          success: success.toString(),
+          component: 'document_processor'
+        },
+        timestamp
+      );
       
       // Track success rate
-      await redisClient.addTimeSeriesData(`success_rate:${operation}`, timestamp, success ? 1 : 0);
+      await timeSeriesManager.addMetric(
+        `success_rate:${operation}`,
+        success ? 1 : 0,
+        {
+          operation,
+          sessionId,
+          component: 'document_processor'
+        },
+        timestamp
+      );
       
       // Track throughput
-      await redisClient.addTimeSeriesData(`throughput:${operation}`, timestamp, 1);
+      await timeSeriesManager.addMetric(
+        `throughput:${operation}`,
+        1,
+        {
+          operation,
+          sessionId,
+          component: 'document_processor'
+        },
+        timestamp
+      );
       
-      console.log(`Tracked ${operation}: ${duration}ms, success: ${success}`);
+      // Track business metrics for document processing
+      if (operation === 'total_processing') {
+        await timeSeriesManager.addMetric(
+          'document_processing:total_time',
+          duration,
+          {
+            sessionId,
+            fileType: this.currentFileType || 'unknown',
+            component: 'business_metrics'
+          },
+          timestamp
+        );
+      }
+      
+      console.log(`Enhanced metrics tracked for ${operation}: ${duration}ms, success: ${success}`);
     } catch (error) {
-      console.error('Error tracking processing metrics:', error);
+      console.error('Error tracking enhanced processing metrics:', error);
       // Don't throw - metrics tracking failure shouldn't block processing
     }
   }
@@ -139,6 +188,9 @@ class DocumentProcessor {
   async processDocument(file: File, leaseId: string): Promise<LeaseAnalysis> {
     const startTime = Date.now();
     let currentStep = 'document_upload';
+    
+    // Set current file type for metrics tracking
+    this.currentFileType = file.type;
     
     try {
       console.log(`Processing document: ${file.name} (${file.size} bytes)`);

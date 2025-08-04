@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import redisClient from '@/lib/redis';
+import timeSeriesManager from '@/lib/timeseries-manager';
+import alertManager from '@/lib/alert-manager';
 import { executeWithErrorHandling } from '@/lib/error-handling';
 
 /**
@@ -19,17 +21,33 @@ export async function GET(request: NextRequest) {
       'redis',
       async () => {
         await redisClient.connect();
+        await timeSeriesManager.initialize();
         
         const key = `${metric}:${operation}`;
-        const data = await redisClient.getTimeSeriesData(key, from, to);
-        const stats = await redisClient.getTimeSeriesStats(key, from, to);
+        
+        // Get cached metrics for better performance
+        const data = await timeSeriesManager.getCachedMetrics(key, from, to);
+        
+        // Get aggregated metrics for different time buckets
+        const hourlyData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'avg', 3600000); // 1 hour
+        const dailyData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'avg', 86400000); // 1 day
+        
+        // Get statistics
+        const stats = await getTimeSeriesStatistics(key, from, to);
+        
+        // Check for alerts (using 1h as default timeRange for GET requests)
+        const alerts = await alertManager.checkAlerts('1h');
         
         return {
           metric,
           operation,
           data,
+          hourlyData,
+          dailyData,
           stats,
-          timeRange: { from, to }
+          alerts,
+          timeRange: { from, to },
+          generatedAt: new Date().toISOString()
         };
       },
       { sessionId: 'analytics' }
@@ -100,8 +118,15 @@ export async function POST(request: NextRequest) {
         // Get violation detection metrics
         const violationMetrics = await getViolationMetrics(from, now, leaseId);
         
+        // Initialize alert manager
+        await alertManager.healthCheck();
+        
         // Get system health metrics
         const healthMetrics = await getHealthMetrics(from, now);
+        
+        // Check for real-time alerts
+        const alerts = await alertManager.checkAlerts(timeRange);
+        const activeAlerts = alertManager.getActiveAlerts();
         
         return {
           timeRange,
@@ -109,7 +134,12 @@ export async function POST(request: NextRequest) {
           processing: processingMetrics,
           engagement: engagementMetrics,
           violations: violationMetrics,
-          health: healthMetrics
+          health: healthMetrics,
+          alerts: {
+            current: alerts,
+            active: activeAlerts
+          },
+          generatedAt: new Date().toISOString()
         };
       },
       { sessionId: leaseId || 'analytics' }
@@ -138,29 +168,77 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Get processing performance metrics
+ * Get TimeSeries statistics with enhanced calculations
+ */
+async function getTimeSeriesStatistics(key: string, from: number, to: number) {
+  try {
+    const redis = await redisClient.getClient();
+    
+    // Get min, max, avg, sum, count using TimeSeries aggregations
+    const minData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'min');
+    const maxData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'max');
+    const avgData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'avg');
+    const sumData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'sum');
+    const countData = await timeSeriesManager.getAggregatedMetrics(key, from, to, 'count');
+    
+    return {
+      min: minData.length > 0 ? Math.min(...minData.map(d => d.value)) : 0,
+      max: maxData.length > 0 ? Math.max(...maxData.map(d => d.value)) : 0,
+      avg: avgData.length > 0 ? avgData.reduce((sum, d) => sum + d.value, 0) / avgData.length : 0,
+      sum: sumData.length > 0 ? sumData.reduce((sum, d) => sum + d.value, 0) : 0,
+      count: countData.length > 0 ? countData.reduce((sum, d) => sum + d.value, 0) : 0,
+      dataPoints: countData.length
+    };
+  } catch (error) {
+    console.error('Error getting TimeSeries statistics:', error);
+    return {
+      min: 0,
+      max: 0,
+      avg: 0,
+      sum: 0,
+      count: 0,
+      dataPoints: 0
+    };
+  }
+}
+
+/**
+ * Get processing performance metrics with enhanced TimeSeries queries
  */
 async function getProcessingMetrics(from: number, to: number) {
   const operations = ['text_extraction', 'clause_extraction', 'clause_processing', 'violation_detection', 'redis_storage', 'total_processing'];
   const metrics: any = {};
   
+  // Get multi-series comparison for better performance
+  const processingTimeKeys = operations.map(op => `processing_time:${op}`);
+  const successRateKeys = operations.map(op => `success_rate:${op}`);
+  const throughputKeys = operations.map(op => `throughput:${op}`);
+  
+  const processingTimeData = await timeSeriesManager.getMultiSeriesComparison(processingTimeKeys, from, to, 'avg');
+  const successRateData = await timeSeriesManager.getMultiSeriesComparison(successRateKeys, from, to, 'avg');
+  const throughputData = await timeSeriesManager.getMultiSeriesComparison(throughputKeys, from, to, 'sum');
+  
   for (const operation of operations) {
-    const processingTimeData = await redisClient.getTimeSeriesData(`processing_time:${operation}`, from, to);
-    const successRateData = await redisClient.getTimeSeriesData(`success_rate:${operation}`, from, to);
-    const throughputData = await redisClient.getTimeSeriesData(`throughput:${operation}`, from, to);
+    const processingTimeKey = `processing_time:${operation}`;
+    const successRateKey = `success_rate:${operation}`;
+    const throughputKey = `throughput:${operation}`;
     
     metrics[operation] = {
       processingTime: {
-        data: processingTimeData,
-        avg: processingTimeData.length > 0 ? processingTimeData.reduce((sum: number, point: any) => sum + point[1], 0) / processingTimeData.length : 0
+        data: processingTimeData[processingTimeKey] || [],
+        avg: processingTimeData[processingTimeKey]?.length > 0 
+          ? processingTimeData[processingTimeKey].reduce((sum: number, point: any) => sum + point.value, 0) / processingTimeData[processingTimeKey].length 
+          : 0
       },
       successRate: {
-        data: successRateData,
-        avg: successRateData.length > 0 ? successRateData.reduce((sum: number, point: any) => sum + point[1], 0) / successRateData.length : 0
+        data: successRateData[successRateKey] || [],
+        avg: successRateData[successRateKey]?.length > 0 
+          ? successRateData[successRateKey].reduce((sum: number, point: any) => sum + point.value, 0) / successRateData[successRateKey].length 
+          : 0
       },
       throughput: {
-        data: throughputData,
-        total: throughputData.reduce((sum: number, point: any) => sum + point[1], 0)
+        data: throughputData[throughputKey] || [],
+        total: throughputData[throughputKey]?.reduce((sum: number, point: any) => sum + point.value, 0) || 0
       }
     };
   }
