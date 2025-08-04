@@ -47,6 +47,89 @@ export interface LeaseAnalysis {
  * Handles PDF text extraction, OCR, and clause analysis
  */
 class DocumentProcessor {
+  private currentSessionId: string | null = null;
+
+  /**
+   * Set current session ID for event tracking
+   */
+  public setSessionId(sessionId: string): void {
+    this.currentSessionId = sessionId;
+  }
+
+  /**
+   * Publish processing event to Redis Streams
+   */
+  private async publishProcessingEvent(leaseId: string, eventType: string, data: any) {
+    try {
+      const redis = await redisClient.getClient();
+      const eventData = {
+        leaseId,
+        eventType,
+        timestamp: new Date().toISOString(),
+        data,
+        sessionId: this.currentSessionId || 'anonymous'
+      };
+      
+      await redis.xadd('lease_processing_stream', '*', 
+        'leaseId', leaseId,
+        'eventType', eventType,
+        'data', JSON.stringify(data),
+        'sessionId', this.currentSessionId || 'anonymous'
+      );
+      
+      console.log(`Published ${eventType} event for lease ${leaseId}`);
+    } catch (error) {
+      console.error('Error publishing processing event:', error);
+      // Don't throw - event publishing failure shouldn't block processing
+    }
+  }
+
+  /**
+   * Publish violation alert to Redis Pub/Sub
+   */
+  private async publishViolationAlert(leaseId: string, violation: any) {
+    try {
+      const redis = await redisClient.getClient();
+      const alertData = {
+        leaseId,
+        violationType: violation.type,
+        severity: violation.severity,
+        timestamp: new Date().toISOString(),
+        message: `Critical violation detected: ${violation.type}`,
+        sessionId: this.currentSessionId || 'anonymous'
+      };
+      
+      await redis.publish('violation_alerts', JSON.stringify(alertData));
+      console.log(`Published violation alert: ${violation.type}`);
+    } catch (error) {
+      console.error('Error publishing violation alert:', error);
+      // Don't throw - alert publishing failure shouldn't block processing
+    }
+  }
+
+  /**
+   * Track processing metrics using Redis TimeSeries
+   */
+  private async trackProcessingMetrics(operation: string, duration: number, success: boolean) {
+    try {
+      const timestamp = Date.now();
+      
+      // Track processing time
+      await redisClient.addTimeSeriesData(`processing_time:${operation}`, timestamp, duration);
+      
+      // Track success rate
+      await redisClient.addTimeSeriesData(`success_rate:${operation}`, timestamp, success ? 1 : 0);
+      
+      // Track throughput
+      await redisClient.addTimeSeriesData(`throughput:${operation}`, timestamp, 1);
+      
+      console.log(`Tracked ${operation}: ${duration}ms, success: ${success}`);
+    } catch (error) {
+      console.error('Error tracking processing metrics:', error);
+      // Don't throw - metrics tracking failure shouldn't block processing
+    }
+  }
+
   /**
    * Process uploaded document (PDF or image)
    * @param file - Uploaded file
@@ -54,28 +137,138 @@ class DocumentProcessor {
    * @returns Processed lease analysis
    */
   async processDocument(file: File, leaseId: string): Promise<LeaseAnalysis> {
+    const startTime = Date.now();
+    let currentStep = 'document_upload';
+    
     try {
       console.log(`Processing document: ${file.name} (${file.size} bytes)`);
       
+      // Publish document upload event
+      await this.publishProcessingEvent(leaseId, 'document_uploaded', {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      });
+      
       // Extract text from document
+      const textStartTime = Date.now();
       const extractedText = await this.extractText(file);
+      const textDuration = Date.now() - textStartTime;
+      await this.trackProcessingMetrics('text_extraction', textDuration, true);
+      
+      // Publish text extraction event
+      await this.publishProcessingEvent(leaseId, 'text_extraction_complete', {
+        textLength: extractedText.length,
+        extractedText: extractedText.substring(0, 200) + '...', // First 200 chars for preview
+        processingTime: textDuration
+      });
       
       // Extract clauses using AI
+      currentStep = 'clause_extraction';
       console.log('Extracting clauses from text...');
+      const clauseStartTime = Date.now();
       const extractedClauses = await geminiClient.extractClauses(extractedText);
+      const clauseDuration = Date.now() - clauseStartTime;
+      await this.trackProcessingMetrics('clause_extraction', clauseDuration, true);
       console.log(`Extracted ${extractedClauses.length} clauses:`, extractedClauses.map(c => ({ text: c.text.substring(0, 100) + '...', section: c.section })));
       
+      // Publish clause extraction event
+      await this.publishProcessingEvent(leaseId, 'clauses_extracted', {
+        clauseCount: extractedClauses.length,
+        sections: extractedClauses.map(c => c.section),
+        processingTime: clauseDuration
+      });
+      
       // Generate embeddings and analyze clauses
+      currentStep = 'clause_processing';
+      const processingStartTime = Date.now();
       const processedClauses = await this.processClauses(extractedClauses, leaseId);
+      const processingDuration = Date.now() - processingStartTime;
+      await this.trackProcessingMetrics('clause_processing', processingDuration, true);
       
       // Detect violations
+      currentStep = 'violation_detection';
+      const violationStartTime = Date.now();
       const violations = await this.detectViolations(processedClauses);
+      const violationDuration = Date.now() - violationStartTime;
+      await this.trackProcessingMetrics('violation_detection', violationDuration, true);
+      
+      // Publish violation detection event
+      await this.publishProcessingEvent(leaseId, 'violations_detected', {
+        violationCount: violations.length,
+        violations: violations.map(v => ({
+          type: v.type,
+          severity: v.severity,
+          description: v.description.substring(0, 100) + '...'
+        })),
+        processingTime: violationDuration
+      });
+      
+      // Publish critical violation alerts
+      for (const violation of violations) {
+        if (violation.severity === 'Critical' || violation.severity === 'High') {
+          await this.publishViolationAlert(leaseId, violation);
+        }
+      }
       
       // Store in Redis
+      currentStep = 'redis_storage';
+      const storageStartTime = Date.now();
       await this.storeInRedis(processedClauses, leaseId);
+      const storageDuration = Date.now() - storageStartTime;
+      await this.trackProcessingMetrics('redis_storage', storageDuration, true);
       
       // Generate summary
       const summary = this.generateSummary(processedClauses, violations);
+      
+      // Calculate total processing time
+      const totalDuration = Date.now() - startTime;
+      await this.trackProcessingMetrics('total_processing', totalDuration, true);
+      
+      // Store command in command store (CQRS)
+      await redisClient.storeCommand({
+        type: 'process_document',
+        data: {
+          leaseId,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          summary,
+          processingTime: totalDuration
+        }
+      });
+
+      // Append event to event store (Event Sourcing)
+      await redisClient.appendEvent('document_events', {
+        type: 'document_processed',
+        data: {
+          leaseId,
+          summary,
+          processingTime: totalDuration,
+          stepDurations: {
+            textExtraction: textDuration,
+            clauseExtraction: clauseDuration,
+            clauseProcessing: processingDuration,
+            violationDetection: violationDuration,
+            redisStorage: storageDuration,
+            total: totalDuration
+          }
+        }
+      });
+
+      // Publish analysis complete event
+      await this.publishProcessingEvent(leaseId, 'analysis_complete', {
+        summary,
+        processingTime: totalDuration,
+        stepDurations: {
+          textExtraction: textDuration,
+          clauseExtraction: clauseDuration,
+          clauseProcessing: processingDuration,
+          violationDetection: violationDuration,
+          redisStorage: storageDuration,
+          total: totalDuration
+        }
+      });
       
       return {
         leaseId,
@@ -85,6 +278,20 @@ class DocumentProcessor {
       };
     } catch (error) {
       console.error('Error processing document:', error);
+      
+      // Track failure metrics
+      const failureDuration = Date.now() - startTime;
+      await this.trackProcessingMetrics(currentStep, failureDuration, false);
+      await this.trackProcessingMetrics('total_processing', failureDuration, false);
+      
+      // Publish error event
+      await this.publishProcessingEvent(leaseId, 'processing_error', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+        failedStep: currentStep,
+        processingTime: failureDuration
+      });
+      
       throw new Error(`Failed to process document: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

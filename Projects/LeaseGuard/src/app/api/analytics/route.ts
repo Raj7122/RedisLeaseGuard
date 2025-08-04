@@ -1,187 +1,289 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionManager, AnalyticsData, PerformanceData, ErrorData } from '@/lib/session-management';
+import redisClient from '@/lib/redis';
+import { executeWithErrorHandling } from '@/lib/error-handling';
 
 /**
- * Analytics API Endpoints
- * 
- * POST /api/analytics - Track analytics event
- * POST /api/analytics/performance - Track performance metrics
- * POST /api/analytics/error - Track error events
- * GET /api/analytics/report - Generate analytics report
- * 
- * Security Features:
- * - Input validation and sanitization
- * - Rate limiting protection
- * - Privacy-compliant data collection
- * - Error handling without exposing sensitive information
+ * GET /api/analytics
+ * Get performance analytics and metrics
  */
-
-export async function POST(request: NextRequest) {
-  try {
-    const { eventType, sessionId, metrics } = await request.json();
-
-    // Input validation
-    if (!eventType || typeof eventType !== 'string') {
-      return NextResponse.json(
-        { error: 'Valid event type is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!sessionId || typeof sessionId !== 'string') {
-      return NextResponse.json(
-        { error: 'Valid session ID is required' },
-        { status: 400 }
-      );
-    }
-
-    if (!metrics || typeof metrics !== 'object') {
-      return NextResponse.json(
-        { error: 'Valid metrics object is required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate event type
-    const validEventTypes = [
-      'document_upload',
-      'ai_question',
-      'session_created',
-      'violation_found',
-      'user_login',
-      'user_logout'
-    ];
-
-    if (!validEventTypes.includes(eventType)) {
-      return NextResponse.json(
-        { error: 'Invalid event type' },
-        { status: 400 }
-      );
-    }
-
-    // Sanitize metrics
-    const sanitizedMetrics = sanitizeMetrics(metrics);
-
-    const analyticsData: AnalyticsData = {
-      eventType,
-      sessionId,
-      timestamp: new Date().toISOString(),
-      metrics: sanitizedMetrics
-    };
-
-    // Track analytics
-    const sessionManager = getSessionManager();
-    await sessionManager.trackAnalytics(analyticsData);
-
-    return NextResponse.json({
-      success: true,
-      message: 'Analytics tracked successfully'
-    });
-
-  } catch (error) {
-    console.error('Analytics tracking error:', error);
-    return NextResponse.json(
-      { error: 'Failed to track analytics' },
-      { status: 500 }
-    );
-  }
-}
-
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const startDate = searchParams.get('startDate');
-    const endDate = searchParams.get('endDate');
-
-    // Input validation
-    if (!startDate || !endDate) {
-      return NextResponse.json(
-        { error: 'Start date and end date are required' },
-        { status: 400 }
-      );
-    }
-
-    // Validate date format
-    const startDateObj = new Date(startDate);
-    const endDateObj = new Date(endDate);
-
-    if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
-      return NextResponse.json(
-        { error: 'Invalid date format' },
-        { status: 400 }
-      );
-    }
-
-    if (startDateObj >= endDateObj) {
-      return NextResponse.json(
-        { error: 'Start date must be before end date' },
-        { status: 400 }
-      );
-    }
-
-    // Generate analytics report
-    const sessionManager = getSessionManager();
-    const report = await sessionManager.generateAnalyticsReport(startDate, endDate);
-
-    if (!report) {
-      return NextResponse.json(
-        { error: 'Failed to generate report' },
-        { status: 500 }
-      );
-    }
+    const metric = searchParams.get('metric') || 'processing_time';
+    const operation = searchParams.get('operation') || 'total_processing';
+    const from = parseInt(searchParams.get('from') || '0');
+    const to = parseInt(searchParams.get('to') || Date.now().toString());
+    
+    const result = await executeWithErrorHandling(
+      'analytics_query',
+      'redis',
+      async () => {
+        await redisClient.connect();
+        
+        const key = `${metric}:${operation}`;
+        const data = await redisClient.getTimeSeriesData(key, from, to);
+        const stats = await redisClient.getTimeSeriesStats(key, from, to);
+        
+        return {
+          metric,
+          operation,
+          data,
+          stats,
+          timeRange: { from, to }
+        };
+      },
+      { sessionId: 'analytics' }
+    );
 
     return NextResponse.json({
       success: true,
-      report
+      ...result
     });
-
+    
   } catch (error) {
-    console.error('Analytics report error:', error);
+    console.error('Analytics API error:', error);
+    
+    if (error instanceof Error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: 'Failed to generate analytics report' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
 /**
- * Sanitize metrics to prevent injection attacks
- * @param metrics - Raw metrics object
- * @returns Sanitized metrics object
+ * POST /api/analytics
+ * Get comprehensive analytics dashboard data
  */
-function sanitizeMetrics(metrics: any): any {
-  const sanitized: any = {};
+export async function POST(request: NextRequest) {
+  try {
+    const { timeRange = '24h', leaseId } = await request.json();
+    
+    const result = await executeWithErrorHandling(
+      'analytics_dashboard',
+      'redis',
+      async () => {
+        await redisClient.connect();
+        
+        const now = Date.now();
+        let from: number;
+        
+        switch (timeRange) {
+          case '1h':
+            from = now - (60 * 60 * 1000);
+            break;
+          case '24h':
+            from = now - (24 * 60 * 60 * 1000);
+            break;
+          case '7d':
+            from = now - (7 * 24 * 60 * 60 * 1000);
+            break;
+          case '30d':
+            from = now - (30 * 24 * 60 * 60 * 1000);
+            break;
+          default:
+            from = now - (24 * 60 * 60 * 1000); // Default to 24h
+        }
+        
+        // Get processing performance metrics
+        const processingMetrics = await getProcessingMetrics(from, now);
+        
+        // Get user engagement metrics
+        const engagementMetrics = await getEngagementMetrics(from, now);
+        
+        // Get violation detection metrics
+        const violationMetrics = await getViolationMetrics(from, now, leaseId);
+        
+        // Get system health metrics
+        const healthMetrics = await getHealthMetrics(from, now);
+        
+        return {
+          timeRange,
+          leaseId,
+          processing: processingMetrics,
+          engagement: engagementMetrics,
+          violations: violationMetrics,
+          health: healthMetrics
+        };
+      },
+      { sessionId: leaseId || 'analytics' }
+    );
 
-  // Only allow specific metric fields
-  const allowedFields = [
-    'userId',
-    'ipAddress',
-    'fileType',
-    'fileSize',
-    'processingTime',
-    'questionLength',
-    'responseTime',
-    'tokensUsed',
-    'violationsCount',
-    'language',
-    'timezone',
-    'deviceType'
-  ];
+    return NextResponse.json({
+      success: true,
+      ...result
+    });
+    
+  } catch (error) {
+    console.error('Analytics dashboard API error:', error);
+    
+    if (error instanceof Error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}
 
-  for (const [key, value] of Object.entries(metrics)) {
-    if (allowedFields.includes(key)) {
-      // Validate and sanitize values
-      if (typeof value === 'string' && value.length <= 1000) {
-        sanitized[key] = value.replace(/[<>]/g, ''); // Remove potential HTML tags
-      } else if (typeof value === 'number' && isFinite(value)) {
-        sanitized[key] = value;
-      } else if (typeof value === 'boolean') {
-        sanitized[key] = value;
-      } else if (value === null) {
-        sanitized[key] = null;
+/**
+ * Get processing performance metrics
+ */
+async function getProcessingMetrics(from: number, to: number) {
+  const operations = ['text_extraction', 'clause_extraction', 'clause_processing', 'violation_detection', 'redis_storage', 'total_processing'];
+  const metrics: any = {};
+  
+  for (const operation of operations) {
+    const processingTimeData = await redisClient.getTimeSeriesData(`processing_time:${operation}`, from, to);
+    const successRateData = await redisClient.getTimeSeriesData(`success_rate:${operation}`, from, to);
+    const throughputData = await redisClient.getTimeSeriesData(`throughput:${operation}`, from, to);
+    
+    metrics[operation] = {
+      processingTime: {
+        data: processingTimeData,
+        avg: processingTimeData.length > 0 ? processingTimeData.reduce((sum: number, point: any) => sum + point[1], 0) / processingTimeData.length : 0
+      },
+      successRate: {
+        data: successRateData,
+        avg: successRateData.length > 0 ? successRateData.reduce((sum: number, point: any) => sum + point[1], 0) / successRateData.length : 0
+      },
+      throughput: {
+        data: throughputData,
+        total: throughputData.reduce((sum: number, point: any) => sum + point[1], 0)
+      }
+    };
+  }
+  
+  return metrics;
+}
+
+/**
+ * Get user engagement metrics
+ */
+async function getEngagementMetrics(from: number, to: number) {
+  try {
+    const redis = await redisClient.getClient();
+    
+    // Get session data
+    const sessionKeys = await redis.keys('session:*');
+    const sessions = [];
+    
+    for (const key of sessionKeys) {
+      const sessionData = await redis.json.get(key);
+      if (sessionData && sessionData.lastActivity) {
+        const lastActivity = new Date(sessionData.lastActivity).getTime();
+        if (lastActivity >= from && lastActivity <= to) {
+          sessions.push(sessionData);
+        }
       }
     }
+    
+    return {
+      totalSessions: sessions.length,
+      activeSessions: sessions.filter(s => s.participants && s.participants.length > 0).length,
+      avgSessionDuration: sessions.length > 0 ? sessions.reduce((sum, s) => {
+        const duration = new Date(s.lastActivity).getTime() - new Date(s.createdAt).getTime();
+        return sum + duration;
+      }, 0) / sessions.length : 0
+    };
+  } catch (error) {
+    console.error('Error getting engagement metrics:', error);
+    return {
+      totalSessions: 0,
+      activeSessions: 0,
+      avgSessionDuration: 0
+    };
   }
+}
 
-  return sanitized;
+/**
+ * Get violation detection metrics
+ */
+async function getViolationMetrics(from: number, to: number, leaseId?: string) {
+  try {
+    const redis = await redisClient.getClient();
+    
+    // Get violation events from stream
+    const violationEvents = await redisClient.getEventStream('lease_processing_stream', '0');
+    const filteredEvents = violationEvents.filter((event: any) => {
+      const eventTime = new Date(event.timestamp).getTime();
+      return eventTime >= from && eventTime <= to && 
+             event.type === 'violations_detected' &&
+             (!leaseId || event.data.leaseId === leaseId);
+    });
+    
+    const totalViolations = filteredEvents.reduce((sum: number, event: any) => {
+      return sum + (event.data.violationCount || 0);
+    }, 0);
+    
+    const severityBreakdown = {
+      Critical: 0,
+      High: 0,
+      Medium: 0,
+      Low: 0
+    };
+    
+    filteredEvents.forEach((event: any) => {
+      event.data.violations?.forEach((violation: any) => {
+        if (severityBreakdown[violation.severity as keyof typeof severityBreakdown] !== undefined) {
+          severityBreakdown[violation.severity as keyof typeof severityBreakdown]++;
+        }
+      });
+    });
+    
+    return {
+      totalViolations,
+      severityBreakdown,
+      detectionEvents: filteredEvents.length
+    };
+  } catch (error) {
+    console.error('Error getting violation metrics:', error);
+    return {
+      totalViolations: 0,
+      severityBreakdown: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+      detectionEvents: 0
+    };
+  }
+}
+
+/**
+ * Get system health metrics
+ */
+async function getHealthMetrics(from: number, to: number) {
+  try {
+    const redis = await redisClient.getClient();
+    
+    // Get error events
+    const errorEvents = await redisClient.getEventStream('lease_processing_stream', '0');
+    const filteredErrors = errorEvents.filter((event: any) => {
+      const eventTime = new Date(event.timestamp).getTime();
+      return eventTime >= from && eventTime <= to && event.type === 'processing_error';
+    });
+    
+    return {
+      totalErrors: filteredErrors.length,
+      errorRate: errorEvents.length > 0 ? (filteredErrors.length / errorEvents.length) * 100 : 0,
+      redisHealth: await redisClient.healthCheck(),
+      lastError: filteredErrors.length > 0 ? filteredErrors[filteredErrors.length - 1] : null
+    };
+  } catch (error) {
+    console.error('Error getting health metrics:', error);
+    return {
+      totalErrors: 0,
+      errorRate: 0,
+      redisHealth: false,
+      lastError: null
+    };
+  }
 } 

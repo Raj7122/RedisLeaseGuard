@@ -4,6 +4,28 @@ import redisClient from '@/lib/redis';
 import { executeWithErrorHandling } from '@/lib/error-handling';
 
 /**
+ * Real-time collaboration session management
+ */
+interface CollaborationSession {
+  sessionId: string;
+  participants: string[];
+  leaseId: string;
+  createdAt: string;
+  lastActivity: string;
+}
+
+/**
+ * Real-time message for collaboration
+ */
+interface CollaborationMessage {
+  type: 'user_joined' | 'user_left' | 'message_sent' | 'annotation_added' | 'violation_highlighted';
+  userId: string;
+  sessionId: string;
+  data?: any;
+  timestamp: string;
+}
+
+/**
  * POST /api/chat
  * Handle AI Q&A with contextual memory
  */
@@ -76,6 +98,19 @@ export async function POST(request: NextRequest) {
           timestamp: new Date().toISOString()
         });
         
+        // Publish real-time message to collaboration channel
+        await publishCollaborationMessage({
+          type: 'message_sent',
+          userId: sessionId || 'anonymous',
+          sessionId: sessionId || leaseId,
+          data: {
+            question,
+            response: response.substring(0, 200) + '...', // Truncate for real-time preview
+            leaseId
+          },
+          timestamp: new Date().toISOString()
+        });
+
         return {
           response,
           sessionId: sessionId || leaseId,
@@ -260,5 +295,103 @@ async function storeConversation(sessionId: string, message: {
     console.log(`Successfully stored conversation message for session: ${sessionId}`);
   } catch (error) {
     console.error('Error storing conversation:', error);
+  }
+}
+
+/**
+ * Join collaboration session
+ */
+async function joinCollaborationSession(sessionId: string, userId: string, leaseId: string): Promise<void> {
+  try {
+    const redis = await redisClient.getClient();
+    
+    // Add user to session participants
+    await redis.sadd(`session:${sessionId}:participants`, userId);
+    
+    // Update session metadata
+    const sessionData: CollaborationSession = {
+      sessionId,
+      participants: [userId],
+      leaseId,
+      createdAt: new Date().toISOString(),
+      lastActivity: new Date().toISOString()
+    };
+    
+    await redis.json.set(`session:${sessionId}`, '$', sessionData);
+    
+    // Publish join event
+    await publishCollaborationMessage({
+      type: 'user_joined',
+      userId,
+      sessionId,
+      data: { leaseId },
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log(`User ${userId} joined collaboration session ${sessionId}`);
+  } catch (error) {
+    console.error('Error joining collaboration session:', error);
+  }
+}
+
+/**
+ * Leave collaboration session
+ */
+async function leaveCollaborationSession(sessionId: string, userId: string): Promise<void> {
+  try {
+    const redis = await redisClient.getClient();
+    
+    // Remove user from session participants
+    await redis.srem(`session:${sessionId}:participants`, userId);
+    
+    // Publish leave event
+    await publishCollaborationMessage({
+      type: 'user_left',
+      userId,
+      sessionId,
+      data: {},
+      timestamp: new Date().toISOString()
+    });
+    
+    console.log(`User ${userId} left collaboration session ${sessionId}`);
+  } catch (error) {
+    console.error('Error leaving collaboration session:', error);
+  }
+}
+
+/**
+ * Publish collaboration message to Redis Pub/Sub
+ */
+async function publishCollaborationMessage(message: CollaborationMessage): Promise<void> {
+  try {
+    const redis = await redisClient.getClient();
+    const channel = `collaboration:${message.sessionId}`;
+    
+    await redis.publish(channel, JSON.stringify(message));
+    console.log(`Published collaboration message: ${message.type} to ${channel}`);
+  } catch (error) {
+    console.error('Error publishing collaboration message:', error);
+    // Don't throw - collaboration failures shouldn't block main functionality
+  }
+}
+
+/**
+ * Subscribe to collaboration channel
+ */
+async function subscribeToCollaborationChannel(sessionId: string, callback: (message: CollaborationMessage) => void) {
+  try {
+    const redis = await redisClient.getClient();
+    const channel = `collaboration:${sessionId}`;
+    
+    const subscriber = redis.duplicate();
+    await subscriber.subscribe(channel, (message) => {
+      const collaborationMessage = JSON.parse(message);
+      callback(collaborationMessage);
+    });
+    
+    return subscriber;
+  } catch (error) {
+    console.error('Error subscribing to collaboration channel:', error);
+    return null;
   }
 } 

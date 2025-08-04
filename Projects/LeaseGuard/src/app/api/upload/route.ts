@@ -41,6 +41,9 @@ export async function POST(request: NextRequest) {
         // Initialize Redis connection
         await redisClient.connect();
         
+        // Set session ID for event tracking
+        documentProcessor.setSessionId(leaseId);
+        
         // Process document
         console.log(`Starting document processing for lease ${leaseId}`);
         return await documentProcessor.processDocument(file, leaseId);
