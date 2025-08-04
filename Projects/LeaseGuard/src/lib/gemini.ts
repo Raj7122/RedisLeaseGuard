@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import semanticCacheManager from './semantic-cache-manager';
 
 /**
  * Gemini AI client configuration for LeaseGuard
@@ -72,10 +73,11 @@ class GeminiClient {
   }
 
   /**
-   * Process user question with lease context
+   * Process user question with lease context and semantic caching
    * @param question - User's question
    * @param leaseContext - Relevant lease clauses and violations
    * @param conversationHistory - Previous conversation context
+   * @param leaseId - Lease identifier for caching
    * @returns AI response with legal guidance
    */
   async processQuestion(
@@ -84,9 +86,25 @@ class GeminiClient {
       clauses: Array<{ text: string; flagged: boolean; severity?: string }>;
       violations: Array<{ type: string; description: string; legal_reference: string }>;
     },
-    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
+    conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+    leaseId?: string
   ): Promise<string> {
     try {
+      // Check semantic cache first
+      if (leaseId) {
+        const cacheQuery = {
+          query: question,
+          leaseId,
+          context: { leaseContext, conversationHistory }
+        };
+        
+        const cachedResponse = await semanticCacheManager.getCachedResponse(cacheQuery);
+        if (cachedResponse) {
+          console.log('Using cached response for question:', question.substring(0, 50));
+          return cachedResponse;
+        }
+      }
+
       // Build context prompt
       const contextPrompt = this.buildContextPrompt(leaseContext, conversationHistory);
       
@@ -104,7 +122,20 @@ class GeminiClient {
       const text = result.response.text();
 
       // Add legal disclaimer
-      return this.addLegalDisclaimer(text);
+      const finalResponse = this.addLegalDisclaimer(text);
+      
+      // Cache the response if leaseId is provided
+      if (leaseId) {
+        const cacheQuery = {
+          query: question,
+          leaseId,
+          context: { leaseContext, conversationHistory }
+        };
+        
+        await semanticCacheManager.storeCachedResponse(cacheQuery, finalResponse);
+      }
+      
+      return finalResponse;
     } catch (error) {
       console.error('Error processing question:', error);
       throw new Error('Failed to process question');
